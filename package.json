@@ -1,0 +1,24 @@
+{
+  "name": "opencode-openai-proxy",
+  "version": "0.1.0",
+  "description": "OpenAI-compatible proxy for OpenCode Go's OpenAI-compatible API.",
+  "private": false,
+  "type": "commonjs",
+  "bin": {
+    "opencode-openai-proxy": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node test.js",
+    "health": "node -e \"fetch('http://127.0.0.1:11434/health').then(r=>r.text()).then(console.log)\""
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "opencode",
+    "openai",
+    "proxy",
+    "openai-compatible"
+  ]
+}

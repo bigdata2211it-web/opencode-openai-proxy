@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+AGENTS.md
+PROJECT_INDEX.md
+node_modules/
+*.log
+npm-debug.log*
+.DS_Store
+coverage/
