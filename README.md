@@ -6,7 +6,7 @@ It accepts OpenAI chat completion requests on `POST /v1/chat/completions`, maps 
 
 ## What It Does
 
-- Serves a local OpenAI-compatible API on `127.0.0.1:11434`.
+- Serves a local OpenAI-compatible API on `127.0.0.1:11435`.
 - Accepts `POST /v1/chat/completions` in OpenAI format.
 - Supports streaming and non-streaming responses.
 - Maps client model names such as `gpt-4o`, `gpt-4`, and `o3-mini` to OpenCode models via `models.json`.
@@ -20,7 +20,7 @@ It accepts OpenAI chat completion requests on `POST /v1/chat/completions`, maps 
 OpenCode Go uses the OpenAI chat completions format. Some coding clients expect a local OpenAI-compatible endpoint with their own model names. This proxy sits between them:
 
 ```text
-Cursor / VS Code / Any OpenAI client -> localhost:11434 -> OpenCode OpenAI Proxy -> OpenCode Go / Zen
+Cursor / VS Code / Any OpenAI client -> localhost:11435 -> OpenCode OpenAI Proxy -> OpenCode Go / Zen
 ```
 
 ## How Model Mapping Works
@@ -67,18 +67,18 @@ export OPENCODE_TIER=zen
 node index.js
 ```
 
-The proxy starts on `http://127.0.0.1:11434` by default.
+The proxy starts on `http://127.0.0.1:11435` by default.
 
 To use another port:
 
 ```bash
-node index.js 11435
+node index.js 11436
 ```
 
 ## Health Check
 
 ```bash
-curl http://127.0.0.1:11434/health
+curl http://127.0.0.1:11435/health
 ```
 
 ## Client Setup
@@ -86,7 +86,7 @@ curl http://127.0.0.1:11434/health
 Point OpenAI-compatible clients at the local proxy:
 
 ```bash
-export OPENAI_BASE_URL=http://127.0.0.1:11434
+export OPENAI_BASE_URL=http://127.0.0.1:11435
 export OPENAI_API_KEY=sk-dummy
 ```
 

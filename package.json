@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node index.js",
     "test": "node test.js",
-    "health": "node -e \"fetch('http://127.0.0.1:11434/health').then(r=>r.text()).then(console.log)\""
+    "health": "node -e \"fetch('http://127.0.0.1:11435/health').then(r=>r.text()).then(console.log)\""
   },
   "engines": {
     "node": ">=18"

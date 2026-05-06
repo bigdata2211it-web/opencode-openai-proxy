@@ -6,7 +6,7 @@
 // Subscription: set OPENCODE_TIER=go (default) or OPENCODE_TIER=zen
 // Models: edit models.json, then restart the proxy.
 
-const PORT = process.argv[2] || 11434;
+const PORT = process.argv[2] || 11435;
 const TIER = (process.env.OPENCODE_TIER || "go").toLowerCase();
 const BASE_URL = TIER === "zen" ? "https://opencode.ai/zen/v1" : "https://opencode.ai/zen/go/v1";
 const CHAT_URL = BASE_URL + "/chat/completions";
