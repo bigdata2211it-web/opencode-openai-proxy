@@ -1,0 +1,16 @@
+{
+  "gpt-5.2": "minimax-m2.7",
+  "gpt-5.2-pro": "minimax-m2.5",
+  "gpt-5.2-codex": "kimi-k2.6",
+  "gpt-5.1": "kimi-k2.5",
+  "gpt-5.1-codex": "glm-5.1",
+  "gpt-5.1-codex-max": "glm-5",
+  "gpt-5.1-codex-mini": "deepseek-v4-pro",
+  "gpt-5": "deepseek-v4-flash",
+  "gpt-5-codex": "qwen3.6-plus",
+  "gpt-5-mini": "qwen3.5-plus",
+  "gpt-5-nano": "mimo-v2-pro",
+  "gpt-4.1": "mimo-v2-omni",
+  "gpt-4.1-mini": "mimo-v2.5-pro",
+  "gpt-4.1-nano": "mimo-v2.5"
+}

@@ -1,7 +1,7 @@
 {
   "name": "opencode-openai-proxy",
   "version": "0.1.0",
-  "description": "OpenAI-compatible proxy for OpenCode Go's OpenAI-compatible API.",
+  "description": "OpenAI-compatible proxy for OpenCode Go and Zen.",
   "private": false,
   "type": "commonjs",
   "bin": {

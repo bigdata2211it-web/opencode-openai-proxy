@@ -4,6 +4,8 @@
 
 const http = require("http");
 const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
 
 let passed = 0;
 let failed = 0;
@@ -35,10 +37,52 @@ function asyncTest(name, fn) {
 
 console.log("\n📦 Model mapping tests:");
 
-function buildMap(cfg) {
+function readConfig(file) {
+  return JSON.parse(fs.readFileSync(path.join(__dirname, file), "utf8"));
+}
+
+test("tier configs declare model inventory without inline aliases", () => {
+  for (const file of ["models-go.json", "models-zen.json"]) {
+    const cfg = readConfig(file);
+    assert.ok(Array.isArray(cfg.models), `${file} should have models array`);
+    assert.ok(cfg.models.length > 0, `${file} should list at least one model`);
+    assert.strictEqual(cfg.routing, undefined, `${file} should not have routing aliases`);
+  }
+});
+
+test("OpenAI route configs cover tier models without duplicate targets", () => {
+  for (const [modelsFile, routesFile] of [
+    ["models-go.json", "routes-openai-go.json"],
+    ["models-zen.json", "routes-openai-zen.json"],
+  ]) {
+    const modelsCfg = readConfig(modelsFile);
+    const routes = readConfig(routesFile);
+    const models = new Set(modelsCfg.models);
+    const routeTargets = Object.values(routes);
+
+    assert.ok(routeTargets.length > 0, `${routesFile} should have routes`);
+    assert.deepStrictEqual(new Set(routeTargets), models, `${routesFile} should cover every tier model`);
+    assert.strictEqual(routeTargets.length, models.size, `${routesFile} should not repeat targets`);
+    for (const [source, target] of Object.entries(routes)) {
+      assert.ok(source.startsWith("gpt-") || source.startsWith("o"), `${source} should be a real OpenAI-style model id`);
+      assert.ok(models.has(target), `${routesFile} should route ${source} to a declared tier model`);
+    }
+  }
+});
+
+function buildMap(models = [], routes = {}) {
   const map = {};
-  for (const [alias, target] of Object.entries(cfg)) {
-    const base = alias.toLowerCase();
+  for (const model of models) {
+    map[model.toLowerCase()] = model;
+  }
+  for (const model of models) {
+    const base = model.toLowerCase();
+    for (const suffix of ["[1m]", "[8k]", "[200k]", "[1]"]) {
+      map[base + suffix] = model;
+    }
+  }
+  for (const [source, target] of Object.entries(routes)) {
+    const base = source.toLowerCase();
     map[base] = target;
     for (const suffix of ["[1m]", "[8k]", "[200k]", "[1]"]) {
       map[base + suffix] = target;
@@ -47,24 +91,26 @@ function buildMap(cfg) {
   return map;
 }
 
-const testCfg = {
-  "gpt-4o": "deepseek-v4-pro",
-  "gpt-4": "qwen3.6-plus",
-  "o3-mini": "deepseek-v4-pro",
-};
-const testMap = buildMap(testCfg);
+const testModels = ["deepseek-v4-pro", "qwen3.6-plus"];
+const testRoutes = { "gpt-5.2": "deepseek-v4-pro", "gpt-4.1": "qwen3.6-plus" };
+const testMap = buildMap(testModels, testRoutes);
 
-test("OpenAI-style model names map correctly", () => {
-  assert.strictEqual(testMap["gpt-4o"], "deepseek-v4-pro");
-  assert.strictEqual(testMap["gpt-4"], "qwen3.6-plus");
-  assert.strictEqual(testMap["o3-mini"], "deepseek-v4-pro");
+test("direct model names map from model inventory", () => {
+  assert.strictEqual(testMap["deepseek-v4-pro"], "deepseek-v4-pro");
+  assert.strictEqual(testMap["qwen3.6-plus"], "qwen3.6-plus");
+});
+
+test("OpenAI route names map from route config", () => {
+  assert.strictEqual(testMap["gpt-5.2"], "deepseek-v4-pro");
+  assert.strictEqual(testMap["gpt-4.1"], "qwen3.6-plus");
 });
 
 test("context suffix maps correctly", () => {
-  assert.strictEqual(testMap["gpt-4o[1m]"], "deepseek-v4-pro");
-  assert.strictEqual(testMap["gpt-4[8k]"], "qwen3.6-plus");
-  assert.strictEqual(testMap["o3-mini[200k]"], "deepseek-v4-pro");
-  assert.strictEqual(testMap["gpt-4o[1]"], "deepseek-v4-pro");
+  assert.strictEqual(testMap["deepseek-v4-pro[1m]"], "deepseek-v4-pro");
+  assert.strictEqual(testMap["qwen3.6-plus[8k]"], "qwen3.6-plus");
+  assert.strictEqual(testMap["deepseek-v4-pro[200k]"], "deepseek-v4-pro");
+  assert.strictEqual(testMap["qwen3.6-plus[1]"], "qwen3.6-plus");
+  assert.strictEqual(testMap["gpt-5.2[200k]"], "deepseek-v4-pro");
 });
 
 test("case-insensitive", () => {
@@ -80,8 +126,8 @@ function cleanModel(name, map) {
 }
 
 test("cleanModel strips suffix and maps", () => {
-  assert.strictEqual(cleanModel("gpt-4o[200k]", testMap), "deepseek-v4-pro");
-  assert.strictEqual(cleanModel("GPT-4[8k]", testMap), "qwen3.6-plus");
+  assert.strictEqual(cleanModel("deepseek-v4-pro[200k]", testMap), "deepseek-v4-pro");
+  assert.strictEqual(cleanModel("QWEN3.6-PLUS[8k]", testMap), "qwen3.6-plus");
 });
 
 test("cleanModel returns original if not mapped", () => {
@@ -90,13 +136,13 @@ test("cleanModel returns original if not mapped", () => {
 });
 
 test("cleanModel is case-insensitive", () => {
-  assert.strictEqual(cleanModel("GPT-4O", testMap), "deepseek-v4-pro");
-  assert.strictEqual(cleanModel("Gpt-4", testMap), "qwen3.6-plus");
+  assert.strictEqual(cleanModel("DeepSeek-V4-Pro", testMap), "deepseek-v4-pro");
+  assert.strictEqual(cleanModel("Qwen3.6-Plus", testMap), "qwen3.6-plus");
 });
 
 test("cleanModel strips context suffix before lookup", () => {
-  assert.strictEqual(cleanModel("gpt-4o[1m]", testMap), "deepseek-v4-pro");
-  assert.strictEqual(cleanModel("o3-mini[200k]", testMap), "deepseek-v4-pro");
+  assert.strictEqual(cleanModel("deepseek-v4-pro[1m]", testMap), "deepseek-v4-pro");
+  assert.strictEqual(cleanModel("qwen3.6-plus[200k]", testMap), "qwen3.6-plus");
 });
 
 // ── HTTP integration tests ──
@@ -105,11 +151,11 @@ console.log("\n🌐 HTTP endpoint tests:");
 
 const PORT = 11499;
 
-async function startProxy() {
+async function startProxy({ tier = "go", port = PORT } = {}) {
   return new Promise((resolve) => {
-    const child = require("child_process").spawn("node", ["index.js", String(PORT)], {
+    const child = require("child_process").spawn("node", ["index.js", String(port)], {
       cwd: __dirname,
-      env: { ...process.env, OPENCODE_API_KEY: "test-key", OPENCODE_TIER: "go" },
+      env: { ...process.env, OPENCODE_API_KEY: "test-key", OPENCODE_TIER: tier },
     });
     child.stderr.on("data", () => {});
     child.stdout.on("data", () => {});
@@ -117,9 +163,9 @@ async function startProxy() {
   });
 }
 
-function httpGet(path) {
+function httpGet(path, port = PORT) {
   return new Promise((resolve, reject) => {
-    http.get(`http://127.0.0.1:${PORT}${path}`, res => {
+    http.get(`http://127.0.0.1:${port}${path}`, res => {
       let data = "";
       res.on("data", c => data += c);
       res.on("end", () => resolve({ status: res.statusCode, body: data }));
@@ -127,10 +173,10 @@ function httpGet(path) {
   });
 }
 
-function httpPost(path, body) {
+function httpPost(path, body, port = PORT) {
   return new Promise((resolve, reject) => {
     const postData = JSON.stringify(body);
-    const req = http.request(`http://127.0.0.1:${PORT}${path}`, {
+    const req = http.request(`http://127.0.0.1:${port}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(postData) },
     }, res => {
@@ -169,10 +215,27 @@ async function runHttpTests() {
     assert.ok(json.data.length > 0);
     assert.ok(json.data.some(m => m.id === "glm-5"));
     assert.ok(json.data.some(m => m.id === "deepseek-v4-pro"));
-    // Check that at least one alias from models.json is present
+    assert.ok(json.data.some(m => m.id === "gpt-5.2"));
     const ids = json.data.map(m => m.id);
-    const hasAnyAlias = ["gpt-4o", "gpt-4", "o3-mini"].some(a => ids.includes(a));
-    assert.ok(hasAnyAlias, "Should have at least one model alias from models.json");
+    assert.ok(!ids.includes("deepseek"), "Should not expose invented aliases");
+    assert.ok(!ids.includes("qwen"), "Should not expose invented aliases");
+  });
+
+  await asyncTest("GET /v1/models uses Zen config when OPENCODE_TIER=zen", async () => {
+    const zenPort = PORT + 1;
+    const zenChild = await startProxy({ tier: "zen", port: zenPort });
+    try {
+      const res = await httpGet("/v1/models", zenPort);
+      assert.strictEqual(res.status, 200);
+      const json = JSON.parse(res.body);
+      const ids = json.data.map(m => m.id);
+      assert.ok(ids.includes("gpt-5.5"));
+      assert.ok(ids.includes("gpt-4o"));
+      assert.ok(ids.includes("claude-opus-4-7"));
+      assert.ok(ids.includes("gemini-3.1-pro"));
+    } finally {
+      zenChild.kill();
+    }
   });
 
   await asyncTest("POST /v1/chat/completions accepts valid request", async () => {
@@ -184,9 +247,24 @@ async function runHttpTests() {
     assert.ok([401, 502, 200].includes(res.status), `Unexpected status: ${res.status}`);
   });
 
-  await asyncTest("POST /v1/chat/completions with mapped OpenAI model name", async () => {
+  await asyncTest("POST /v1/chat/completions with direct model name", async () => {
     const res = await httpPost("/v1/chat/completions", {
-      model: "gpt-4o",
+      model: "deepseek-v4-pro",
+      messages: [{ role: "user", content: "hello" }],
+    });
+    assert.ok(res.status !== 404, "Endpoint should exist");
+  });
+
+  await asyncTest("POST /v1/chat/completions with OpenAI route model name", async () => {
+    const res = await httpPost("/v1/chat/completions", {
+      model: "gpt-5.2",
+      messages: [{ role: "user", content: "hello" }],
+    });
+    assert.ok(res.status !== 404, "Endpoint should exist");
+  });
+
+  await asyncTest("POST /v1/chat/completions accepts missing model", async () => {
+    const res = await httpPost("/v1/chat/completions", {
       messages: [{ role: "user", content: "hello" }],
     });
     assert.ok(res.status !== 404, "Endpoint should exist");

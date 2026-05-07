@@ -2,48 +2,42 @@
 
 OpenCode OpenAI Proxy is a small local bridge that lets OpenAI-compatible clients talk to **OpenCode Go** or **OpenCode Zen**.
 
-It accepts OpenAI chat completion requests on `POST /v1/chat/completions`, maps model names, and forwards them to OpenCode Go's OpenAI-compatible API.
+It accepts OpenAI chat completion requests on `POST /v1/chat/completions` and forwards them to OpenCode Go or Zen.
 
 ## What It Does
 
 - Serves a local OpenAI-compatible API on `127.0.0.1:11435`.
 - Accepts `POST /v1/chat/completions` in OpenAI format.
 - Supports streaming and non-streaming responses.
-- Maps client model names such as `gpt-4o`, `gpt-4`, and `o3-mini` to OpenCode models via `models.json`.
 - Exposes `/health` for quick checks.
-- Exposes `/v1/models` with OpenCode Go models and client aliases.
-- Reads model aliases from `models.json` and reloads them when the file changes.
+- Exposes `/v1/models` with direct OpenCode models and optional OpenAI route model names.
+- Reads model inventory from `models-go.json` or `models-zen.json`.
+- Reads OpenAI model routing from `routes-openai-go.json` or `routes-openai-zen.json`.
 - Keeps the real OpenCode API key in `OPENCODE_API_KEY`, outside the repo.
 
 ## Why
 
-OpenCode Go uses the OpenAI chat completions format. Some coding clients expect a local OpenAI-compatible endpoint with their own model names. This proxy sits between them:
+OpenCode Go and Zen use the OpenAI chat completions format. Some coding clients expect a local OpenAI-compatible endpoint. This proxy sits between them:
 
 ```text
 Cursor / VS Code / Any OpenAI client -> localhost:11435 -> OpenCode OpenAI Proxy -> OpenCode Go / Zen
 ```
 
-## How Model Mapping Works
+## How Models Work
 
-Clients send their normal model names:
+Clients can send either direct OpenCode model IDs or real OpenAI model IDs from the route file:
 
-- Cursor may send `gpt-4o` or `gpt-4`.
-- VS Code extensions send whatever model they're configured for.
+- Cursor can send `deepseek-v4-pro`, `qwen3.6-plus`, `gpt-5.5`, or any model exposed by `/v1/models`.
+- Cursor can also send routed OpenAI names such as `gpt-5.2`, `gpt-4.1`, or `o3`.
+- VS Code extensions send whatever model ID they're configured for.
 - Any OpenAI-compatible client works.
 
-The proxy maps these to OpenCode Go models:
-
-```text
-gpt-4o -> models.json -> deepseek-v4-pro
-gpt-4  -> models.json -> qwen3.6-plus
-```
-
-OpenCode Go never sees the original client model name. It receives a normal OpenAI-format request with the mapped model.
+Direct OpenCode model IDs are forwarded as-is. OpenAI route model IDs are mapped through the selected `routes-openai-*.json` file.
 
 In short:
 
 - Clients talk OpenAI format to localhost.
-- The proxy maps model names and forwards as OpenAI.
+- The proxy accepts direct Go/Zen model IDs and routed OpenAI model IDs.
 - No format conversion needed — both sides speak OpenAI.
 
 ## Requirements
@@ -90,39 +84,42 @@ export OPENAI_BASE_URL=http://127.0.0.1:11435
 export OPENAI_API_KEY=sk-dummy
 ```
 
-Any model name the client sends will be mapped via `models.json`.
+Use one of the model IDs returned by `/v1/models`.
 
-## Model Mapping
+## Model Config
 
-Edit `models.json` to choose which OpenCode model each OpenAI-style client model name should use:
+Edit `models-go.json` for `OPENCODE_TIER=go` or `models-zen.json` for `OPENCODE_TIER=zen`.
+These files contain direct OpenCode model IDs:
 
 ```json
 {
-  "gpt-4o": "deepseek-v4-pro",
-  "gpt-4": "qwen3.6-plus",
-  "o3-mini": "deepseek-v4-pro"
+  "models": ["deepseek-v4-pro", "qwen3.6-plus"]
 }
 ```
 
-The left side is what the local client sends. The right side is the OpenCode model sent upstream.
+Edit `routes-openai-go.json` or `routes-openai-zen.json` to map real OpenAI model IDs to the active tier's models:
 
-If a client sends an OpenCode model directly, and that name is not listed in `models.json`, the proxy forwards it as-is.
-
-Common context suffixes are also accepted, for example `gpt-4o[200k]` or `o3-mini[8k]`.
-
-Available OpenCode Go models:
-
-```text
-glm-5, glm-5.1, kimi-k2.5, kimi-k2.6, minimax-m2.5, minimax-m2.7,
-deepseek-v4-flash, deepseek-v4-pro, qwen3.5-plus, qwen3.6-plus,
-mimo-v2-pro, mimo-v2-omni, mimo-v2.5, mimo-v2.5-pro
+```json
+{
+  "gpt-5.2": "deepseek-v4-pro",
+  "gpt-4.1": "qwen3.6-plus"
+}
 ```
+
+Route targets must exist in the matching `models-*.json`. The shipped route files cover every tier model once, without duplicate targets. Common context suffixes are accepted for both direct model IDs and routed OpenAI IDs, for example `deepseek-v4-pro[200k]` or `gpt-5.2[200k]`.
+
+The shipped configs are based on the current OpenCode `/v1/models` endpoints:
+
+- `models-go.json` covers OpenCode Go models.
+- `models-zen.json` covers OpenCode Zen models.
+- `routes-openai-go.json` maps real OpenAI model IDs to Go models.
+- `routes-openai-zen.json` maps real OpenAI model IDs to Zen models.
 
 ## Endpoints
 
 - `HEAD /` and `HEAD /v1` - connection checks.
 - `GET /health` - proxy status.
-- `GET /v1/models` - available models and aliases.
+- `GET /v1/models` - available direct models and OpenAI route names.
 - `POST /v1/chat/completions` - OpenAI-compatible chat endpoint.
 
 ## Environment
@@ -143,8 +140,7 @@ Do not commit `.env`; it is ignored by git.
 | **Go** | `go` (default) | `https://opencode.ai/zen/go/v1/chat/completions` | $5 first month, then $10/month (flat) |
 | **Zen** | `zen` | `https://opencode.ai/zen/v1/chat/completions` | Pay-as-you-go, no limits |
 
-Both tiers use the same API key and the same set of open models (Qwen, GLM, Kimi, MiniMax, DeepSeek, MiMo).
-Zen additionally provides Claude, GPT, Gemini, and several free models.
+Both tiers use the same API key. Go and Zen model lists are kept separately in their JSON files, because OpenCode can change each tier independently.
 
 To switch tiers, change `OPENCODE_TIER` and restart the proxy.
 
@@ -160,7 +156,7 @@ For direct questions or feedback, message:
 
 ## Notes
 
-This project is intentionally small: one Node.js entrypoint, one model mapping file, and no external runtime dependencies.
+This project is intentionally small: one Node.js entrypoint, tier-specific model config files, and no external runtime dependencies.
 Supports both OpenCode Go (flat subscription) and OpenCode Zen (pay-as-you-go) via `OPENCODE_TIER`.
 
 ## License

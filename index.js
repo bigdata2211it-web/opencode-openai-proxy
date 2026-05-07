@@ -4,39 +4,35 @@
 // Usage: node index.js [port]
 //
 // Subscription: set OPENCODE_TIER=go (default) or OPENCODE_TIER=zen
-// Models: edit models.json, then restart the proxy.
+// Models: edit models-go.json or models-zen.json, then restart the proxy.
 
 const PORT = process.argv[2] || 11435;
 const TIER = (process.env.OPENCODE_TIER || "go").toLowerCase();
 const BASE_URL = TIER === "zen" ? "https://opencode.ai/zen/v1" : "https://opencode.ai/zen/go/v1";
 const CHAT_URL = BASE_URL + "/chat/completions";
 const API_KEY = process.env.OPENCODE_API_KEY || (() => { console.error("ERROR: Set OPENCODE_API_KEY env var"); process.exit(1); })();
-const CONFIG_PATH = __dirname + "/models.json";
+const CONFIG_PATH = TIER === "zen" ? __dirname + "/models-zen.json" : __dirname + "/models-go.json";
+const ROUTES_PATH = TIER === "zen" ? __dirname + "/routes-openai-zen.json" : __dirname + "/routes-openai-go.json";
 
 const http = require("http");
 const url = require("url");
 const fs = require("fs");
 
-// All available opencode-go models
-const MODELS = [
-  "glm-5", "glm-5.1",
-  "kimi-k2.5", "kimi-k2.6",
-  "minimax-m2.5", "minimax-m2.7",
-  "deepseek-v4-flash", "deepseek-v4-pro",
-  "qwen3.5-plus", "qwen3.6-plus",
-  "mimo-v2-pro", "mimo-v2-omni", "mimo-v2.5", "mimo-v2.5-pro",
-];
-
-// Build client model name -> target model map from models.json.
-// Keys are explicit client model names, for example "gpt-4o" or "o3-mini".
-function buildMap(cfg) {
+// Build direct model name -> model map from the tier config.
+function buildMap(models = [], routes = {}) {
   const map = {};
-  for (const [alias, target] of Object.entries(cfg)) {
-    const base = alias.toLowerCase();
-
-    map[base] = target;
+  for (const model of models) {
+    const base = model.toLowerCase();
+    map[base] = model;
 
     // Common context suffixes used by local OpenAI-compatible clients.
+    for (const suffix of ["[1m]", "[8k]", "[200k]", "[1]"]) {
+      map[base + suffix] = model;
+    }
+  }
+  for (const [source, target] of Object.entries(routes)) {
+    const base = source.toLowerCase();
+    map[base] = target;
     for (const suffix of ["[1m]", "[8k]", "[200k]", "[1]"]) {
       map[base + suffix] = target;
     }
@@ -45,17 +41,54 @@ function buildMap(cfg) {
 }
 
 let MAP = {};
-function loadConfig() {
+let MODELS = [];
+let ROUTES = {};
+
+function readTierConfig() {
+  const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+  if (!Array.isArray(cfg.models) || cfg.models.length === 0) {
+    throw new Error("missing non-empty models array");
+  }
+  if (Object.prototype.hasOwnProperty.call(cfg, "routing")) {
+    throw new Error("inline routing is not supported; use routes-openai-*.json");
+  }
+  return cfg;
+}
+
+function readRouteConfig(models) {
+  const routes = JSON.parse(fs.readFileSync(ROUTES_PATH, "utf8"));
+  if (!routes || typeof routes !== "object" || Array.isArray(routes)) {
+    throw new Error("routes file must be an object");
+  }
+  const modelSet = new Set(models);
+  const targets = Object.values(routes);
+  for (const [source, target] of Object.entries(routes)) {
+    if (!source.startsWith("gpt-") && !source.startsWith("o")) {
+      throw new Error(`route ${source} is not an OpenAI-style model id`);
+    }
+    if (!modelSet.has(target)) {
+      throw new Error(`route ${source} points to unknown model ${target}`);
+    }
+  }
+  if (new Set(targets).size !== targets.length) {
+    throw new Error("routes file has duplicate targets");
+  }
+  return routes;
+}
+
+function loadConfig({ exitOnError = false } = {}) {
   try {
-    const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
-    MAP = buildMap(cfg);
-    console.log("📋 Models loaded from models.json:", JSON.stringify(cfg));
+    const cfg = readTierConfig();
+    MODELS = [...new Set(cfg.models)];
+    ROUTES = readRouteConfig(MODELS);
+    MAP = buildMap(MODELS, ROUTES);
+    console.log(`📋 Models loaded from ${CONFIG_PATH.split("/").pop()} + ${ROUTES_PATH.split("/").pop()}:`, JSON.stringify({ models: MODELS, routes: ROUTES }));
   } catch (e) {
-    console.error("⚠️  Can't read models.json:", e.message, "— using defaults");
-    MAP = { "gpt-4o": "glm-5", "gpt-4": "glm-5", "o3-mini": "glm-5" };
+    console.error(`⚠️  Can't read model config:`, e.message);
+    if (exitOnError) process.exit(1);
   }
 }
-loadConfig();
+loadConfig({ exitOnError: true });
 
 function cleanModel(name) {
   name = name.replace(/\[.*?\]$/, "");
@@ -65,7 +98,11 @@ function cleanModel(name) {
 
 // Watch config file for changes
 fs.watchFile(CONFIG_PATH, () => {
-  console.log("🔄 models.json changed — reloading...");
+  console.log(`🔄 ${CONFIG_PATH.split("/").pop()} changed — reloading...`);
+  loadConfig();
+});
+fs.watchFile(ROUTES_PATH, () => {
+  console.log(`🔄 ${ROUTES_PATH.split("/").pop()} changed — reloading...`);
   loadConfig();
 });
 
@@ -88,17 +125,15 @@ function handleRequest(req, res) {
   if (pathname === "/v1/models" && req.method === "GET") {
     const all = [];
     for (const id of MODELS) {
-      all.push(id, id + "[1m]", id + "[8k]", id + "[200k]");
-    }
-    for (const alias of Object.keys(MAP)) {
-      all.push(alias);
-      // Only add context suffixes to bare aliases (not ones that already contain brackets)
-      if (!alias.includes("[")) {
-        all.push(alias + "[1m]", alias + "[8k]");
+      all.push(id);
+      // Only add context suffixes for Go tier (fewer models)
+      if (TIER !== "zen") {
+        all.push(id + "[1m]", id + "[8k]", id + "[200k]");
       }
     }
+    for (const id of Object.keys(MAP)) all.push(id);
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ object: "list", data: [...new Set(all)].map(id => ({ id, object: "model", owned_by: "opencode-go" })) }));
+    res.end(JSON.stringify({ object: "list", data: [...new Set(all)].map(id => ({ id, object: "model", owned_by: TIER === "zen" ? "opencode-zen" : "opencode-go" })) }));
     return;
   }
 
@@ -116,7 +151,7 @@ function handleRequest(req, res) {
     try {
       const body = JSON.parse(rawBody);
       // Map model name
-      body.model = cleanModel(body.model || "deepseek-v4-pro");
+      body.model = cleanModel(body.model || MODELS[0]);
       const isStream = !!body.stream;
 
       fetch(CHAT_URL, {
