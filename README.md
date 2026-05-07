@@ -86,6 +86,49 @@ export OPENAI_API_KEY=sk-dummy
 
 Use one of the model IDs returned by `/v1/models`.
 
+`OPENAI_API_KEY` is only a local client placeholder here. It is not the real OpenCode key and it is not routed or exchanged for a secret. Many OpenAI-compatible clients require this variable to be non-empty, so `sk-dummy` is enough.
+
+The real secret stays only in the proxy process:
+
+```bash
+export OPENCODE_API_KEY=<your-real-opencode-key>
+```
+
+Request flow:
+
+```text
+OpenAI-compatible client
+  OPENAI_BASE_URL=http://127.0.0.1:11435
+  OPENAI_API_KEY=sk-dummy
+        |
+        v
+local proxy
+  OPENCODE_API_KEY=<your-real-opencode-key>
+        |
+        v
+OpenCode Go / Zen
+```
+
+This proxy can be used as a local OpenAI-compatible provider for clients that support a custom base URL, including coding CLIs, IDE extensions, and local tools such as Codex, OpenCode, Cursor, Roo Code, Cline, Continue, aider, and LiteLLM.
+
+The client only needs to know:
+
+- Base URL: `http://127.0.0.1:11435`
+- API key: any non-empty local placeholder, for example `sk-dummy`
+- Model: either a direct OpenCode model from `models-go.json` / `models-zen.json`, or an OpenAI route name from `routes-openai-go.json` / `routes-openai-zen.json`
+
+Examples:
+
+```text
+qwen3.6-plus    # direct Go/Zen model
+deepseek-v4-pro # direct Go/Zen model
+gpt-5-codex     # routed OpenAI model name
+gpt-4o          # routed OpenAI model name
+o3              # routed OpenAI model name
+```
+
+From the client's point of view, this proxy behaves like an OpenAI provider on localhost. The real OpenCode key stays in the proxy process as `OPENCODE_API_KEY`; clients do not need the real OpenCode key.
+
 ## Model Config
 
 Edit `models-go.json` for `OPENCODE_TIER=go` or `models-zen.json` for `OPENCODE_TIER=zen`.
